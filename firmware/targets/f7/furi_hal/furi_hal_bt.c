@@ -18,9 +18,6 @@
 
 #define TAG "FuriHalBt"
 
-#define FURI_HAL_BT_DEFAULT_MAC_ADDR \
-    { 0x6c, 0x7a, 0xd8, 0xac, 0x57, 0x72 }
-
 /* Time, in ms, to wait for mode transition before crashing */
 #define C2_MODE_SWITCH_TIMEOUT 10000
 
@@ -232,26 +229,40 @@ bool furi_hal_bt_start_app(FuriHalBtProfile profile, GapEventCallback event_cb, 
             FURI_LOG_E(TAG, "Can't start Ble App - unsupported radio stack");
             break;
         }
-        // Set mac address
-        memcpy(
-            profile_config[profile].config.mac_address,
-            furi_hal_version_get_ble_mac(),
-            sizeof(profile_config[profile].config.mac_address));
-        // Set advertise name
-        strlcpy(
-            profile_config[profile].config.adv_name,
-            furi_hal_version_get_ble_local_device_name_ptr(),
-            FURI_HAL_VERSION_DEVICE_NAME_LENGTH);
-        // Configure GAP
         GapConfig* config = &profile_config[profile].config;
+        // Configure GAP
         if(profile == FuriHalBtProfileSerial) {
+            // Set mac address
+            memcpy(
+                config->mac_address, furi_hal_version_get_ble_mac(), sizeof(config->mac_address));
+            // Set advertise name
+            strlcpy(
+                config->adv_name,
+                furi_hal_version_get_ble_local_device_name_ptr(),
+                FURI_HAL_BT_ADV_NAME_LENGTH);
+
             config->adv_service_uuid |= furi_hal_version_get_hw_color();
         } else if(profile == FuriHalBtProfileHidKeyboard) {
             // Change MAC address for HID profile
-            config->mac_address[2]++;
+            const uint8_t* normal_mac = furi_hal_version_get_ble_mac();
+            uint8_t empty_mac[sizeof(config->mac_address)] = FURI_HAL_BT_EMPTY_MAC_ADDR;
+            uint8_t default_mac[sizeof(config->mac_address)] = FURI_HAL_BT_DEFAULT_MAC_ADDR;
+            if(memcmp(config->mac_address, empty_mac, sizeof(config->mac_address)) == 0 ||
+               memcmp(config->mac_address, normal_mac, sizeof(config->mac_address)) == 0 ||
+               memcmp(config->mac_address, default_mac, sizeof(config->mac_address)) == 0) {
+                memcpy(config->mac_address, normal_mac, sizeof(config->mac_address));
+                config->mac_address[2]++;
+            }
             // Change name Flipper -> Control
-            const char* clicker_str = "Control";
-            memcpy(&config->adv_name[1], clicker_str, strlen(clicker_str));
+            if(strnlen(config->adv_name, FURI_HAL_BT_ADV_NAME_LENGTH) < 2 ||
+               strnlen(config->adv_name + 1, FURI_HAL_BT_ADV_NAME_LENGTH - 1) < 1) {
+                snprintf(
+                    config->adv_name,
+                    FURI_HAL_BT_ADV_NAME_LENGTH,
+                    "%cControl %s",
+                    AD_TYPE_COMPLETE_LOCAL_NAME,
+                    furi_hal_version_get_name_ptr());
+            }
         }
         if(!gap_init(config, event_cb, context)) {
             gap_thread_stop();
@@ -319,6 +330,10 @@ bool furi_hal_bt_change_app(FuriHalBtProfile profile, GapEventCallback event_cb,
 
 bool furi_hal_bt_is_active() {
     return gap_get_state() > GapStateIdle;
+}
+
+bool furi_hal_bt_is_connected() {
+    return gap_get_state() == GapStateConnected;
 }
 
 void furi_hal_bt_start_advertising() {
@@ -457,6 +472,121 @@ float furi_hal_bt_get_rssi() {
         val += (float)((417 * rssi + 18080) >> 10);
     }
     return val;
+}
+
+/** fill the RSSI of the remote host of the bt connection and returns the last 
+ *  time the RSSI was updated
+ * 
+*/
+uint32_t furi_hal_bt_get_conn_rssi(uint8_t* rssi) {
+    int8_t ret_rssi = 0;
+    uint32_t since = gap_get_remote_conn_rssi(&ret_rssi);
+
+    if(ret_rssi == 127 || since == 0) return 0;
+
+    *rssi = (uint8_t)abs(ret_rssi);
+
+    return since;
+}
+
+// API for BLE beacon plugin
+bool furi_hal_bt_custom_adv_set(const uint8_t* adv_data, size_t adv_len) {
+    tBleStatus status = aci_gap_additional_beacon_set_data(adv_len, adv_data);
+    if(status) {
+        FURI_LOG_E(TAG, "custom_adv_set failed %d", status);
+        return false;
+    } else {
+        FURI_LOG_D(TAG, "custom_adv_set success");
+        return true;
+    }
+}
+
+bool furi_hal_bt_custom_adv_start(
+    uint16_t min_interval,
+    uint16_t max_interval,
+    uint8_t mac_type,
+    const uint8_t mac_addr[GAP_MAC_ADDR_SIZE],
+    uint8_t power_amp_level) {
+    tBleStatus status = aci_gap_additional_beacon_start(
+        min_interval / 0.625, // Millis to gap time
+        max_interval / 0.625, // Millis to gap time
+        0b00000111, // All 3 channels
+        mac_type,
+        mac_addr,
+        power_amp_level);
+    if(status) {
+        FURI_LOG_E(TAG, "custom_adv_start failed %d", status);
+        return false;
+    } else {
+        FURI_LOG_D(TAG, "custom_adv_start success");
+        return true;
+    }
+}
+
+bool furi_hal_bt_custom_adv_stop() {
+    tBleStatus status = aci_gap_additional_beacon_stop();
+    if(status) {
+        FURI_LOG_E(TAG, "custom_adv_stop failed %d", status);
+        return false;
+    } else {
+        FURI_LOG_D(TAG, "custom_adv_stop success");
+        return true;
+    }
+}
+
+void furi_hal_bt_reverse_mac_addr(uint8_t mac_addr[GAP_MAC_ADDR_SIZE]) {
+    uint8_t tmp;
+    for(size_t i = 0; i < GAP_MAC_ADDR_SIZE / 2; i++) {
+        tmp = mac_addr[i];
+        mac_addr[i] = mac_addr[GAP_MAC_ADDR_SIZE - 1 - i];
+        mac_addr[GAP_MAC_ADDR_SIZE - 1 - i] = tmp;
+    }
+}
+
+void furi_hal_bt_set_profile_adv_name(
+    FuriHalBtProfile profile,
+    const char name[FURI_HAL_BT_ADV_NAME_LENGTH]) {
+    furi_assert(profile < FuriHalBtProfileNumber);
+    furi_assert(name);
+
+    if(strlen(name) == 0) {
+        memset(&(profile_config[profile].config.adv_name[1]), 0, FURI_HAL_BT_ADV_NAME_LENGTH - 1);
+    } else {
+        profile_config[profile].config.adv_name[0] = AD_TYPE_COMPLETE_LOCAL_NAME;
+        strlcpy(
+            &(profile_config[profile].config.adv_name[1]),
+            name,
+            FURI_HAL_BT_ADV_NAME_LENGTH - 1 /* BLE symbol */);
+    }
+}
+
+const char* furi_hal_bt_get_profile_adv_name(FuriHalBtProfile profile) {
+    furi_assert(profile < FuriHalBtProfileNumber);
+    return &(profile_config[profile].config.adv_name[1]);
+}
+
+void furi_hal_bt_set_profile_mac_addr(
+    FuriHalBtProfile profile,
+    const uint8_t mac_addr[GAP_MAC_ADDR_SIZE]) {
+    furi_assert(profile < FuriHalBtProfileNumber);
+    furi_assert(mac_addr);
+
+    memcpy(profile_config[profile].config.mac_address, mac_addr, GAP_MAC_ADDR_SIZE);
+}
+
+const uint8_t* furi_hal_bt_get_profile_mac_addr(FuriHalBtProfile profile) {
+    furi_assert(profile < FuriHalBtProfileNumber);
+    return profile_config[profile].config.mac_address;
+}
+
+void furi_hal_bt_set_profile_pairing_method(FuriHalBtProfile profile, GapPairing pairing_method) {
+    furi_assert(profile < FuriHalBtProfileNumber);
+    profile_config[profile].config.pairing_method = pairing_method;
+}
+
+GapPairing furi_hal_bt_get_profile_pairing_method(FuriHalBtProfile profile) {
+    furi_assert(profile < FuriHalBtProfileNumber);
+    return profile_config[profile].config.pairing_method;
 }
 
 uint32_t furi_hal_bt_get_transmitted_packets() {

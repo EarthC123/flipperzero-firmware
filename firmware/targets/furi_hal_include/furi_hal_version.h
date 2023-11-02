@@ -18,6 +18,8 @@ extern "C" {
 #define FURI_HAL_VERSION_ARRAY_NAME_LENGTH (FURI_HAL_VERSION_NAME_LENGTH + 1)
 /** BLE symbol + "Flipper " + name */
 #define FURI_HAL_VERSION_DEVICE_NAME_LENGTH (1 + 8 + FURI_HAL_VERSION_ARRAY_NAME_LENGTH)
+// 18 characters + null terminator
+#define FURI_HAL_BT_ADV_NAME_LENGTH (FURI_HAL_VERSION_DEVICE_NAME_LENGTH + 1)
 
 /** OTP Versions enum */
 typedef enum {
