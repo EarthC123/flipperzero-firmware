@@ -13,6 +13,7 @@ App(
         "u2f",
         "archive",
         "main_apps_on_start",
+        "bad_bt",
     ],
 )
 

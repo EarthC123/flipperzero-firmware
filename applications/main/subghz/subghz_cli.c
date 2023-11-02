@@ -26,7 +26,7 @@
 #define SUBGHZ_FREQUENCY_RANGE_STR \
     "299999755...348000000 or 386999938...464000000 or 778999847...928000000"
 
-#define SUBGHZ_REGION_FILENAME "/int/.region_data"
+#define SUBGHZ_REGION_FILENAME "/ext/.region_data"
 
 #define TAG "SubGhzCli"
 
