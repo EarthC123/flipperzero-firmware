@@ -79,7 +79,7 @@ void scene_on_enter_key_display(void* context)
 /* Handles scene manager events for the key display scene. */
 bool scene_on_event_key_display(void* context, SceneManagerEvent event)
 {
-	FURI_LOG_I(APPLICATION_NAME, "scene_on_event_key_display");
+	FURI_LOG_D(APPLICATION_NAME, "scene_on_event_key_display");
 
 	furi_assert(context);
 	ESubGhzChatState* state = context;
