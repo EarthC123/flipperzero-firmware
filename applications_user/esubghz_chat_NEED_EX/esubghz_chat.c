@@ -150,13 +150,20 @@ void enter_chat(ESubGhzChatState *state)
 	furi_string_cat_printf(state->chat_box_store, "\nEncrypted: %s",
 			(state->encrypted ? "yes" : "no"));
 
-	FURI_LOG_I("Fjone", "about to subghz_tx_rx_worker_start: %s", state->subghz_device->name);
+	FURI_LOG_I("Fjone", "about to subghz_tx_rx_worker_start: %s, %ld", state->subghz_device->name, state->frequency);
 
 	//----------------FjoneWARNING----------------	
-	//不可以使用下面一行，在加装了外部天线后就会卡死
-	subghz_tx_rx_worker_start(state->subghz_worker, state->subghz_device, state->frequency);
-	//----------------FjoneWARNING----------------
-	FURI_LOG_I("Fjone", "subghz_tx_rx_worker_start done");
+	if(subghz_tx_rx_worker_start(state->subghz_worker, state->subghz_device, state->frequency)){
+		FURI_LOG_I("Fjone", "subghz_tx_rx_worker_start done");
+		//----------------FjoneWARNING----------------
+
+		//----------------FjoneWARNING----------------
+		/* set the have_read callback of the Sub-GHz worker */
+		subghz_tx_rx_worker_set_callback_have_read(
+			state->subghz_worker, have_read_cb, state);
+		FURI_LOG_I("Fjone", "set subghz worker done");
+		//----------------FjoneWARNING----------------
+	}
 
 	if (strcmp(state->subghz_device->name, "cc1101_ext") == 0) {
 		furi_string_cat_printf(state->chat_box_store,
@@ -286,7 +293,7 @@ static void esubghz_chat_check_messages(ESubGhzChatState *state)
  * Sub-GHz worker and calls post_rx(). Then calls the scene manager. */
 static void esubghz_chat_tick_event_callback(void* context)
 {
-	FURI_LOG_I(APPLICATION_NAME, "esubghz_chat_tick_event_callback");
+	FURI_LOG_T("Fjone", "esubghz_chat_tick_event_callback");
 
 	furi_assert(context);
 	ESubGhzChatState* state = context;
@@ -671,13 +678,6 @@ int32_t esubghz_chat(const char *args)
 		goto err_alloc_kd;
 	}
 
-	//----------------FjoneWARNING----------------
-	state->subghz_worker = subghz_tx_rx_worker_alloc();
-	if (state->subghz_worker == NULL) {
-		goto err_alloc_worker;
-	}
-	//----------------FjoneWARNING----------------
-
 	state->crypto_ctx = crypto_ctx_alloc();
 	if (state->crypto_ctx == NULL) {
 		goto err_alloc_crypto;
@@ -689,31 +689,27 @@ int32_t esubghz_chat(const char *args)
 	/* in the first few views there is no background support */
 	state->exit_for_real = true;
 
-	/* set the have_read callback of the Sub-GHz worker */
-	//----------------FjoneWARNING----------------
-	subghz_tx_rx_worker_set_callback_have_read(state->subghz_worker,
-			have_read_cb, state);
-	//----------------FjoneWARNING----------------
+	//----------------Fjone WARNING----------------
+	/* init subghz device */
+	subghz_devices_init();
 
-	FURI_LOG_I("Fjone", "set subghz worker");
+	state->subghz_device = radio_device_loader_set(SubGhzRadioDeviceTypeExternalCC1101);
+
+	FURI_LOG_I("Fjone", "init subghz device ok");
+	//----------------Fjone WARNING----------------
+
+	//----------------Fjone WARNING----------------
+	state->subghz_worker = subghz_tx_rx_worker_alloc();
+	if (state->subghz_worker == NULL) {
+		goto err_alloc_worker;
+	}
+	FURI_LOG_I("Fjone", "init subghz rx_tx_worker ok");
+	//----------------Fjone WARNING----------------
 
 	/* enter suppress charge mode */
 	furi_hal_power_suppress_charge_enter();
 
 	FURI_LOG_I("Fjone", "enter power charge mode");
-
-	/* init subghz device */
-
-	//----------------FjoneWARNING----------------
-	subghz_devices_init();
-
-	state->subghz_device = radio_device_loader_set(state->subghz_device, SubGhzRadioDeviceTypeExternalCC1101);
-
-	//subghz_devices_reset(state->subghz_device);
-	//subghz_devices_idle(state->subghz_device);
-	//----------------FjoneWARNING----------------
-
-	FURI_LOG_I("Fjone", "init subghz device ok");
 
 	/* set chat name prefix */
 	furi_string_printf(state->name_prefix, "%s",
@@ -726,12 +722,6 @@ int32_t esubghz_chat(const char *args)
 	state->notification = furi_record_open(RECORD_NOTIFICATION);
 
 	FURI_LOG_I("Fjone", "get notification record done");
-
-	/* hook into the view port's draw and input callbacks */
-	state->orig_draw_cb = state->view_dispatcher->view_port->draw_callback;
-	state->orig_input_cb = state->view_dispatcher->view_port->input_callback;
-
-	FURI_LOG_I("Fjone", "back up ori callback");
 
 	// 这里一定有很大的问题, 为什么要替换默认的 view port 呢?
 	// view_port_draw_callback_set(state->view_dispatcher->view_port,

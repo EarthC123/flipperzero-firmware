@@ -51,7 +51,7 @@ typedef struct {
 
 	// for Sub-GHz
 	uint32_t frequency;
-	const SubGhzTxRxWorker *subghz_worker;
+	SubGhzTxRxWorker *subghz_worker;
 	const SubGhzDevice *subghz_device;
 
 	// message assembly before TX
@@ -71,9 +71,6 @@ typedef struct {
 	char rx_str_buffer[RX_TX_BUFFER_SIZE + 1];
 	volatile uint32_t last_time_rx_data;
 
-	// for locking
-	ViewPortDrawCallback orig_draw_cb;
-	ViewPortInputCallback orig_input_cb;
 	bool kbd_locked;
 	uint32_t kbd_lock_msg_ticks;
 	uint8_t kbd_lock_count;

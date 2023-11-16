@@ -31,18 +31,16 @@ static bool freq_input_validator(const char *text, FuriString *error,
 		return false;
 	}
 
-	if (!subghz_devices_is_frequency_valid(state->subghz_device,
-				state->frequency)) {
-		furi_string_printf(error, "Frequency\n%lu\n is invalid!",
-				state->frequency);
+	if (!subghz_devices_is_frequency_valid(state->subghz_device, state->frequency)) {
+		furi_string_printf(error, "Frequency\n%lu\n is invalid!", state->frequency);
 		return false;
 	}
 
 #ifdef FW_ORIGIN_Official
 	if (!furi_hal_region_is_frequency_allowed(state->frequency)) {
-#else /* FW_ORIGIN_Official */
+#else
 	if (!furi_hal_subghz_is_tx_allowed(state->frequency)) {
-#endif /* FW_ORIGIN_Official */
+#endif
 		furi_string_printf(error, "TX forbidden\non frequency\n%lu!",
 				state->frequency);
 		return false;
@@ -83,7 +81,7 @@ void scene_on_enter_freq_input(void* context)
 /* Handles scene manager events for the frequency input scene. */
 bool scene_on_event_freq_input(void* context, SceneManagerEvent event)
 {
-	FURI_LOG_I(APPLICATION_NAME, "scene_on_event_freq_input");
+	FURI_LOG_D(APPLICATION_NAME, "scene_on_event_freq_input");
 
 	furi_assert(context);
 	ESubGhzChatState* state = context;

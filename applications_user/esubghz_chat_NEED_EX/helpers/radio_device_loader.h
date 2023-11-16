@@ -8,6 +8,6 @@ typedef enum {
     SubGhzRadioDeviceTypeExternalCC1101,
 } SubGhzRadioDeviceType;
 
-const SubGhzDevice* radio_device_loader_set(const SubGhzDevice* current_radio_device, SubGhzRadioDeviceType radio_device_type);
+const SubGhzDevice* radio_device_loader_set(uint32_t device_ind);
 
 void radio_device_loader_end(const SubGhzDevice* radio_device);
