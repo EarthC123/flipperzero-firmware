@@ -203,10 +203,10 @@ void exit_chat(ESubGhzChatState *state)
 }
 
 /* Whether or not to display the locked message. */
-// static bool kbd_lock_msg_display(ESubGhzChatState *state)
-// {
-// 	return (state->kbd_lock_msg_ticks != 0);
-// }
+static bool kbd_lock_msg_display(ESubGhzChatState *state)
+{
+ 	return (state->kbd_lock_msg_ticks != 0);
+}
 
 /* Whether or not to hide the locked message again. */
 static bool kbd_lock_msg_reset_timeout(ESubGhzChatState *state)
@@ -235,19 +235,19 @@ static void kbd_lock_msg_reset(ESubGhzChatState *state, bool backlight_off)
 	}
 }
 
-// /* Locks the keyboard. */
-// static void kbd_lock(ESubGhzChatState *state)
-// {
-// 	state->kbd_locked = true;
-// 	kbd_lock_msg_reset(state, true);
-// }
+/* Locks the keyboard. */
+static void kbd_lock(ESubGhzChatState *state)
+{
+	state->kbd_locked = true;
+	kbd_lock_msg_reset(state, true);
+}
 
-// /* Unlocks the keyboard. */
-// static void kbd_unlock(ESubGhzChatState *state)
-// {
-// 	state->kbd_locked = false;
-// 	kbd_lock_msg_reset(state, false);
-// }
+/* Unlocks the keyboard. */
+static void kbd_unlock(ESubGhzChatState *state)
+{
+	state->kbd_locked = false;
+	kbd_lock_msg_reset(state, false);
+}
 
 /* Custom event callback for view dispatcher. Just calls scene manager. */
 static bool esubghz_chat_custom_event_callback(void* context, uint32_t event)
@@ -309,7 +309,6 @@ static void esubghz_chat_tick_event_callback(void* context)
 	scene_manager_handle_tick_event(state->scene_manager);
 }
 
-#if 0
 /* Hooks into the view port's draw callback to overlay the keyboard locked
  * message. */
 static void esubghz_hooked_draw_callback(Canvas* canvas, void* context)
@@ -473,7 +472,6 @@ static void esubghz_hooked_input_callback(InputEvent* event, void* context)
 	/* call original callback */
 	state->orig_input_cb(event, state->view_dispatcher);
 }
-#endif
 
 static const char *esubghz_get_bgloader_app_path(const char *args)
 {
@@ -723,11 +721,15 @@ int32_t esubghz_chat(const char *args)
 
 	FURI_LOG_I("Fjone", "get notification record done");
 
-	// 这里一定有很大的问题, 为什么要替换默认的 view port 呢?
-	// view_port_draw_callback_set(state->view_dispatcher->view_port,
-	// 		esubghz_hooked_draw_callback, state);
-	// view_port_input_callback_set(state->view_dispatcher->view_port,
-	// 		esubghz_hooked_input_callback, state);
+	/* hook into the view port's draw and input callbacks */
+	state->orig_draw_cb = state->view_dispatcher->view_port->draw_callback;
+	state->orig_input_cb = state->view_dispatcher->view_port->input_callback;
+	FURI_LOG_I("Fjone", "back up ori callback");
+
+	view_port_draw_callback_set(state->view_dispatcher->view_port,
+			esubghz_hooked_draw_callback, state);
+	view_port_input_callback_set(state->view_dispatcher->view_port,
+			esubghz_hooked_input_callback, state);
 
 	FURI_LOG_I("Fjone", "set view dispatcher callback skip");
 
