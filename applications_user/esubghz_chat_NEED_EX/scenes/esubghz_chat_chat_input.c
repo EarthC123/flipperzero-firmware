@@ -45,7 +45,7 @@ static bool chat_input_validator(const char *text, FuriString *error,
 /* Prepares the message input scene. */
 void scene_on_enter_chat_input(void* context)
 {
-	FURI_LOG_I(APPLICATION_NAME, "scene_on_enter_chat_input");
+	FURI_LOG_T(APPLICATION_NAME, "scene_on_enter_chat_input");
 
 	furi_assert(context);
 	ESubGhzChatState* state = context;
@@ -73,7 +73,7 @@ void scene_on_enter_chat_input(void* context)
 /* Handles scene manager events for the message input scene. */
 bool scene_on_event_chat_input(void* context, SceneManagerEvent event)
 {
-	FURI_LOG_D(APPLICATION_NAME, "scene_on_event_chat_input");
+	FURI_LOG_T(APPLICATION_NAME, "scene_on_event_chat_input");
 
 	furi_assert(context);
 	ESubGhzChatState* state = context;
@@ -109,7 +109,7 @@ bool scene_on_event_chat_input(void* context, SceneManagerEvent event)
 /* Cleans up the password input scene. */
 void scene_on_exit_chat_input(void* context)
 {
-	FURI_LOG_I(APPLICATION_NAME, "scene_on_exit_chat_input");
+	FURI_LOG_T(APPLICATION_NAME, "scene_on_exit_chat_input");
 
 	furi_assert(context);
 	ESubGhzChatState* state = context;

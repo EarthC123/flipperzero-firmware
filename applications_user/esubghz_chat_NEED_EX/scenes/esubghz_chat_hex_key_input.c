@@ -30,7 +30,7 @@ static void hex_key_input_cb(void* context)
 /* Prepares the hex key input scene. */
 void scene_on_enter_hex_key_input(void* context)
 {
-	FURI_LOG_I(APPLICATION_NAME, "scene_on_enter_hex_key_input");
+	FURI_LOG_T(APPLICATION_NAME, "scene_on_enter_hex_key_input");
 
 	furi_assert(context);
 	ESubGhzChatState* state = context;
@@ -49,7 +49,7 @@ void scene_on_enter_hex_key_input(void* context)
 /* Handles scene manager events for the hex key input scene. */
 bool scene_on_event_hex_key_input(void* context, SceneManagerEvent event)
 {
-	FURI_LOG_D(APPLICATION_NAME, "scene_on_event_hex_key_input");
+	FURI_LOG_T(APPLICATION_NAME, "scene_on_event_hex_key_input");
 
 	furi_assert(context);
 	ESubGhzChatState* state = context;
@@ -79,7 +79,7 @@ bool scene_on_event_hex_key_input(void* context, SceneManagerEvent event)
 /* Cleans up the hex key input scene. */
 void scene_on_exit_hex_key_input(void* context)
 {
-	FURI_LOG_I(APPLICATION_NAME, "scene_on_exit_hex_key_input");
+	FURI_LOG_T(APPLICATION_NAME, "scene_on_exit_hex_key_input");
 
 	furi_assert(context);
 	ESubGhzChatState* state = context;

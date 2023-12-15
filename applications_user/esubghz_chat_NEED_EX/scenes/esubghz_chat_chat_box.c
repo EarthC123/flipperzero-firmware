@@ -3,7 +3,7 @@
 /* Prepares the text box scene. */
 void scene_on_enter_chat_box(void* context)
 {
-	FURI_LOG_I(APPLICATION_NAME, "scene_on_enter_chat_box");
+	FURI_LOG_T(APPLICATION_NAME, "scene_on_enter_chat_box");
 
 	furi_assert(context);
 	ESubGhzChatState* state = context;
@@ -19,7 +19,7 @@ void scene_on_enter_chat_box(void* context)
 /* Handles scene manager events for the text box scene. */
 bool scene_on_event_chat_box(void* context, SceneManagerEvent event)
 {
-	FURI_LOG_D(APPLICATION_NAME, "scene_on_event_chat_box");
+	FURI_LOG_T(APPLICATION_NAME, "scene_on_event_chat_box");
 
 	furi_assert(context);
 	ESubGhzChatState* state = context;
@@ -58,7 +58,7 @@ bool scene_on_event_chat_box(void* context, SceneManagerEvent event)
 /* Cleans up the text box scene. */
 void scene_on_exit_chat_box(void* context)
 {
-	FURI_LOG_I(APPLICATION_NAME, "scene_on_exit_chat_box");
+	FURI_LOG_T(APPLICATION_NAME, "scene_on_exit_chat_box");
 
 	furi_assert(context);
 	ESubGhzChatState* state = context;
