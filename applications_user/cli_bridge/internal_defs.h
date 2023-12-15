@@ -9,6 +9,8 @@
 #include <gui/view_dispatcher.h>
 #include <gui/modules/menu.h>
 #include <gui/modules/submenu.h>
+#include <FreeRTOS.h>
+#include <task.h>
 
 typedef struct {
     FuriThreadStdoutWriteCallback write_callback;
