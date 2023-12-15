@@ -1,67 +1,85 @@
-#include "infrared_i.h"
+#include "infrared_app_i.h"
 
 #include <string.h>
+#include <toolbox/path.h>
 #include <dolphin/dolphin.h>
 
-static const NotificationSequence* infrared_notification_sequences[] = {
-    &sequence_success,
-    &sequence_set_only_green_255,
-    &sequence_reset_green,
-    &sequence_solid_yellow,
-    &sequence_reset_rgb,
-    &sequence_blink_start_cyan,
-    &sequence_blink_start_magenta,
-    &sequence_blink_stop,
+#define TAG "InfraredApp"
+
+#define INFRARED_TX_MIN_INTERVAL_MS 50U
+
+static const NotificationSequence*
+    infrared_notification_sequences[InfraredNotificationMessageCount] = {
+        &sequence_success,
+        &sequence_set_only_green_255,
+        &sequence_reset_green,
+        &sequence_solid_yellow,
+        &sequence_reset_rgb,
+        &sequence_blink_start_cyan,
+        &sequence_blink_start_magenta,
+        &sequence_blink_stop,
 };
 
-static void infrared_make_app_folder(Infrared* infrared) {
+static void infrared_make_app_folder(InfraredApp* infrared) {
     if(!storage_simply_mkdir(infrared->storage, INFRARED_APP_FOLDER)) {
-        dialog_message_show_storage_error(infrared->dialogs, "Cannot create\napp folder");
+        infrared_show_error_message(infrared, "Cannot create\napp folder");
     }
 }
 
 static bool infrared_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
-    Infrared* infrared = context;
+    InfraredApp* infrared = context;
     return scene_manager_handle_custom_event(infrared->scene_manager, event);
 }
 
 static bool infrared_back_event_callback(void* context) {
     furi_assert(context);
-    Infrared* infrared = context;
+    InfraredApp* infrared = context;
     return scene_manager_handle_back_event(infrared->scene_manager);
 }
 
 static void infrared_tick_event_callback(void* context) {
     furi_assert(context);
-    Infrared* infrared = context;
+    InfraredApp* infrared = context;
     scene_manager_handle_tick_event(infrared->scene_manager);
 }
 
-static void infrared_rpc_command_callback(RpcAppSystemEvent event, void* context) {
+static void infrared_rpc_command_callback(const RpcAppSystemEvent* event, void* context) {
     furi_assert(context);
-    Infrared* infrared = context;
+    InfraredApp* infrared = context;
     furi_assert(infrared->rpc_ctx);
 
-    if(event == RpcAppEventSessionClose) {
+    if(event->type == RpcAppEventTypeSessionClose) {
         view_dispatcher_send_custom_event(
             infrared->view_dispatcher, InfraredCustomEventTypeRpcSessionClose);
         rpc_system_app_set_callback(infrared->rpc_ctx, NULL, NULL);
         infrared->rpc_ctx = NULL;
-    } else if(event == RpcAppEventAppExit) {
+    } else if(event->type == RpcAppEventTypeAppExit) {
         view_dispatcher_send_custom_event(
             infrared->view_dispatcher, InfraredCustomEventTypeRpcExit);
-    } else if(event == RpcAppEventLoadFile) {
+    } else if(event->type == RpcAppEventTypeLoadFile) {
+        furi_assert(event->data.type == RpcAppSystemEventDataTypeString);
+        furi_string_set(infrared->file_path, event->data.string);
         view_dispatcher_send_custom_event(
-            infrared->view_dispatcher, InfraredCustomEventTypeRpcLoad);
-    } else if(event == RpcAppEventButtonPress) {
-        view_dispatcher_send_custom_event(
-            infrared->view_dispatcher, InfraredCustomEventTypeRpcButtonPress);
-    } else if(event == RpcAppEventButtonRelease) {
+            infrared->view_dispatcher, InfraredCustomEventTypeRpcLoadFile);
+    } else if(event->type == RpcAppEventTypeButtonPress) {
+        furi_assert(
+            event->data.type == RpcAppSystemEventDataTypeString ||
+            event->data.type == RpcAppSystemEventDataTypeInt32);
+        if(event->data.type == RpcAppSystemEventDataTypeString) {
+            furi_string_set(infrared->button_name, event->data.string);
+            view_dispatcher_send_custom_event(
+                infrared->view_dispatcher, InfraredCustomEventTypeRpcButtonPressName);
+        } else {
+            infrared->app_state.current_button_index = event->data.i32;
+            view_dispatcher_send_custom_event(
+                infrared->view_dispatcher, InfraredCustomEventTypeRpcButtonPressIndex);
+        }
+    } else if(event->type == RpcAppEventTypeButtonRelease) {
         view_dispatcher_send_custom_event(
             infrared->view_dispatcher, InfraredCustomEventTypeRpcButtonRelease);
     } else {
-        rpc_system_app_confirm(infrared->rpc_ctx, event, false);
+        rpc_system_app_confirm(infrared->rpc_ctx, false);
     }
 }
 
@@ -107,10 +125,11 @@ static void infrared_find_vacant_remote_name(FuriString* name, const char* path)
     furi_record_close(RECORD_STORAGE);
 }
 
-static Infrared* infrared_alloc() {
-    Infrared* infrared = malloc(sizeof(Infrared));
+static InfraredApp* infrared_alloc() {
+    InfraredApp* infrared = malloc(sizeof(InfraredApp));
 
     infrared->file_path = furi_string_alloc();
+    infrared->button_name = furi_string_alloc();
 
     InfraredAppState* app_state = &infrared->app_state;
     app_state->is_learning_new_remote = false;
@@ -137,7 +156,7 @@ static Infrared* infrared_alloc() {
 
     infrared->worker = infrared_worker_alloc();
     infrared->remote = infrared_remote_alloc();
-    infrared->received_signal = infrared_signal_alloc();
+    infrared->current_signal = infrared_signal_alloc();
     infrared->brute_force = infrared_brute_force_alloc();
 
     infrared->submenu = submenu_alloc();
@@ -178,7 +197,7 @@ static Infrared* infrared_alloc() {
     return infrared;
 }
 
-static void infrared_free(Infrared* infrared) {
+static void infrared_free(InfraredApp* infrared) {
     furi_assert(infrared);
     ViewDispatcher* view_dispatcher = infrared->view_dispatcher;
     InfraredAppState* app_state = &infrared->app_state;
@@ -220,7 +239,7 @@ static void infrared_free(Infrared* infrared) {
     scene_manager_free(infrared->scene_manager);
 
     infrared_brute_force_free(infrared->brute_force);
-    infrared_signal_free(infrared->received_signal);
+    infrared_signal_free(infrared->current_signal);
     infrared_remote_free(infrared->remote);
     infrared_worker_free(infrared->worker);
 
@@ -234,82 +253,83 @@ static void infrared_free(Infrared* infrared) {
     infrared->gui = NULL;
 
     furi_string_free(infrared->file_path);
+    furi_string_free(infrared->button_name);
 
     free(infrared);
 }
 
 bool infrared_add_remote_with_button(
-    Infrared* infrared,
+    const InfraredApp* infrared,
     const char* button_name,
-    InfraredSignal* signal) {
+    const InfraredSignal* signal) {
     InfraredRemote* remote = infrared->remote;
 
-    FuriString *new_name, *new_path;
-    new_name = furi_string_alloc_set(INFRARED_DEFAULT_REMOTE_NAME);
-    new_path = furi_string_alloc_set(INFRARED_APP_FOLDER);
+    FuriString* new_name = furi_string_alloc_set(INFRARED_DEFAULT_REMOTE_NAME);
+    FuriString* new_path = furi_string_alloc_set(INFRARED_APP_FOLDER);
 
     infrared_find_vacant_remote_name(new_name, furi_string_get_cstr(new_path));
     furi_string_cat_printf(
         new_path, "/%s%s", furi_string_get_cstr(new_name), INFRARED_APP_EXTENSION);
 
-    infrared_remote_reset(remote);
-    infrared_remote_set_name(remote, furi_string_get_cstr(new_name));
-    infrared_remote_set_path(remote, furi_string_get_cstr(new_path));
+    bool success = false;
+
+    do {
+        if(!infrared_remote_create(remote, furi_string_get_cstr(new_path))) break;
+        if(!infrared_remote_append_signal(remote, signal, button_name)) break;
+        success = true;
+    } while(false);
 
     furi_string_free(new_name);
     furi_string_free(new_path);
-    return infrared_remote_add_button(remote, button_name, signal);
+
+    return success;
 }
 
-bool infrared_rename_current_remote(Infrared* infrared, const char* name) {
+bool infrared_rename_current_remote(const InfraredApp* infrared, const char* new_name) {
     InfraredRemote* remote = infrared->remote;
-    const char* remote_path = infrared_remote_get_path(remote);
+    const char* old_path = infrared_remote_get_path(remote);
 
-    if(!strcmp(infrared_remote_get_name(remote), name)) {
+    if(!strcmp(infrared_remote_get_name(remote), new_name)) {
         return true;
     }
 
-    FuriString* new_name;
-    new_name = furi_string_alloc_set(name);
+    FuriString* new_name_fstr = furi_string_alloc_set(new_name);
+    FuriString* new_path_fstr = furi_string_alloc_set(old_path);
 
-    infrared_find_vacant_remote_name(new_name, remote_path);
+    infrared_find_vacant_remote_name(new_name_fstr, old_path);
 
-    FuriString* new_path;
-    new_path = furi_string_alloc_set(infrared_remote_get_path(remote));
-    if(furi_string_end_with(new_path, INFRARED_APP_EXTENSION)) {
-        size_t filename_start = furi_string_search_rchar(new_path, '/');
-        furi_string_left(new_path, filename_start);
+    if(furi_string_end_with(new_path_fstr, INFRARED_APP_EXTENSION)) {
+        path_extract_dirname(old_path, new_path_fstr);
     }
-    furi_string_cat_printf(
-        new_path, "/%s%s", furi_string_get_cstr(new_name), INFRARED_APP_EXTENSION);
 
-    Storage* storage = furi_record_open(RECORD_STORAGE);
+    path_append(new_path_fstr, furi_string_get_cstr(new_name_fstr));
+    furi_string_cat(new_path_fstr, INFRARED_APP_EXTENSION);
 
-    FS_Error status = storage_common_rename(
-        storage, infrared_remote_get_path(remote), furi_string_get_cstr(new_path));
-    infrared_remote_set_name(remote, furi_string_get_cstr(new_name));
-    infrared_remote_set_path(remote, furi_string_get_cstr(new_path));
+    const bool success = infrared_remote_rename(remote, furi_string_get_cstr(new_path_fstr));
 
-    furi_string_free(new_name);
-    furi_string_free(new_path);
+    furi_string_free(new_name_fstr);
+    furi_string_free(new_path_fstr);
 
-    furi_record_close(RECORD_STORAGE);
-    return (status == FSE_OK || status == FSE_EXIST);
+    return success;
 }
 
-void infrared_tx_start_signal(Infrared* infrared, InfraredSignal* signal) {
+void infrared_tx_start(InfraredApp* infrared) {
     if(infrared->app_state.is_transmitting) {
-        FURI_LOG_D(INFRARED_LOG_TAG, "Transmitter is already active");
         return;
-    } else {
-        infrared->app_state.is_transmitting = true;
     }
 
-    if(infrared_signal_is_raw(signal)) {
-        InfraredRawSignal* raw = infrared_signal_get_raw_signal(signal);
-        infrared_worker_set_raw_signal(infrared->worker, raw->timings, raw->timings_size,raw->frequency, raw->duty_cycle);
+    const uint32_t time_elapsed = furi_get_tick() - infrared->app_state.last_transmit_time;
+
+    if(time_elapsed < INFRARED_TX_MIN_INTERVAL_MS) {
+        return;
+    }
+
+    if(infrared_signal_is_raw(infrared->current_signal)) {
+        const InfraredRawSignal* raw = infrared_signal_get_raw_signal(infrared->current_signal);
+        infrared_worker_set_raw_signal(
+            infrared->worker, raw->timings, raw->timings_size, raw->frequency, raw->duty_cycle);
     } else {
-        InfraredMessage* message = infrared_signal_get_message(signal);
+        const InfraredMessage* message = infrared_signal_get_message(infrared->current_signal);
         infrared_worker_set_decoded_signal(infrared->worker, message);
     }
 
@@ -319,84 +339,96 @@ void infrared_tx_start_signal(Infrared* infrared, InfraredSignal* signal) {
     infrared_worker_tx_set_get_signal_callback(
         infrared->worker, infrared_worker_tx_get_signal_steady_callback, infrared);
     infrared_worker_tx_start(infrared->worker);
+
+    infrared->app_state.is_transmitting = true;
 }
 
-void infrared_tx_start_button_index(Infrared* infrared, size_t button_index) {
-    furi_assert(button_index < infrared_remote_get_button_count(infrared->remote));
+void infrared_tx_start_button_index(InfraredApp* infrared, size_t button_index) {
+    furi_assert(button_index < infrared_remote_get_signal_count(infrared->remote));
 
-    InfraredRemoteButton* button = infrared_remote_get_button(infrared->remote, button_index);
-    InfraredSignal* signal = infrared_remote_button_get_signal(button);
-
-    infrared_tx_start_signal(infrared, signal);
-    infrared_play_notification_message(infrared, InfraredNotificationMessageBlinkStartSend);
-}
-
-void infrared_tx_start_received(Infrared* infrared) {
-    infrared_tx_start_signal(infrared, infrared->received_signal);
-    infrared_play_notification_message(infrared, InfraredNotificationMessageBlinkStartSend);
-}
-
-void infrared_tx_stop(Infrared* infrared) {
-    if(!infrared->app_state.is_transmitting) {
-        FURI_LOG_D(INFRARED_LOG_TAG, "Transmitter is already stopped");
-        return;
+    if(infrared_remote_load_signal(infrared->remote, infrared->current_signal, button_index)) {
+        infrared_tx_start(infrared);
     } else {
-        infrared->app_state.is_transmitting = false;
+        infrared_show_error_message(
+            infrared,
+            "Failed to load\n\"%s\"",
+            infrared_remote_get_signal_name(infrared->remote, button_index));
+    }
+}
+
+void infrared_tx_stop(InfraredApp* infrared) {
+    if(!infrared->app_state.is_transmitting) {
+        return;
     }
 
     infrared_worker_tx_stop(infrared->worker);
     infrared_worker_tx_set_get_signal_callback(infrared->worker, NULL, NULL);
 
     infrared_play_notification_message(infrared, InfraredNotificationMessageBlinkStop);
+
+    infrared->app_state.is_transmitting = false;
+    infrared->app_state.last_transmit_time = furi_get_tick();
 }
 
-void infrared_text_store_set(Infrared* infrared, uint32_t bank, const char* text, ...) {
+void infrared_text_store_set(InfraredApp* infrared, uint32_t bank, const char* fmt, ...) {
     va_list args;
-    va_start(args, text);
+    va_start(args, fmt);
 
-    vsnprintf(infrared->text_store[bank], INFRARED_TEXT_STORE_SIZE, text, args);
+    vsnprintf(infrared->text_store[bank], INFRARED_TEXT_STORE_SIZE, fmt, args);
 
     va_end(args);
 }
 
-void infrared_text_store_clear(Infrared* infrared, uint32_t bank) {
+void infrared_text_store_clear(InfraredApp* infrared, uint32_t bank) {
     memset(infrared->text_store[bank], 0, INFRARED_TEXT_STORE_SIZE + 1);
 }
 
-void infrared_play_notification_message(Infrared* infrared, uint32_t message) {
-    furi_assert(message < sizeof(infrared_notification_sequences) / sizeof(NotificationSequence*));
+void infrared_play_notification_message(
+    const InfraredApp* infrared,
+    InfraredNotificationMessage message) {
+    furi_assert(message < InfraredNotificationMessageCount);
     notification_message(infrared->notifications, infrared_notification_sequences[message]);
 }
 
-void infrared_show_loading_popup(Infrared* infrared, bool show) {
-    TaskHandle_t timer_task = xTaskGetHandle(configTIMER_SERVICE_TASK_NAME);
+void infrared_show_loading_popup(const InfraredApp* infrared, bool show) {
     ViewStack* view_stack = infrared->view_stack;
     Loading* loading = infrared->loading;
 
     if(show) {
         // Raise timer priority so that animations can play
-        vTaskPrioritySet(timer_task, configMAX_PRIORITIES - 1);
+        furi_timer_set_thread_priority(FuriTimerThreadPriorityElevated);
         view_stack_add_view(view_stack, loading_get_view(loading));
     } else {
         view_stack_remove_view(view_stack, loading_get_view(loading));
         // Restore default timer priority
-        vTaskPrioritySet(timer_task, configTIMER_TASK_PRIORITY);
+        furi_timer_set_thread_priority(FuriTimerThreadPriorityNormal);
     }
+}
+
+void infrared_show_error_message(const InfraredApp* infrared, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+
+    FuriString* message = furi_string_alloc_vprintf(fmt, args);
+    dialog_message_show_storage_error(infrared->dialogs, furi_string_get_cstr(message));
+
+    furi_string_free(message);
+    va_end(args);
 }
 
 void infrared_signal_received_callback(void* context, InfraredWorkerSignal* received_signal) {
     furi_assert(context);
-    Infrared* infrared = context;
+    InfraredApp* infrared = context;
 
     if(infrared_worker_signal_is_decoded(received_signal)) {
         infrared_signal_set_message(
-            infrared->received_signal, infrared_worker_get_decoded_signal(received_signal));
+            infrared->current_signal, infrared_worker_get_decoded_signal(received_signal));
     } else {
         const uint32_t* timings;
         size_t timings_size;
         infrared_worker_get_raw_signal(received_signal, &timings, &timings_size);
         infrared_signal_set_raw_signal(
-            infrared->received_signal,
+            infrared->current_signal,
             timings,
             timings_size,
             INFRARED_COMMON_CARRIER_FREQUENCY,
@@ -409,20 +441,20 @@ void infrared_signal_received_callback(void* context, InfraredWorkerSignal* rece
 
 void infrared_text_input_callback(void* context) {
     furi_assert(context);
-    Infrared* infrared = context;
+    InfraredApp* infrared = context;
     view_dispatcher_send_custom_event(
         infrared->view_dispatcher, InfraredCustomEventTypeTextEditDone);
 }
 
 void infrared_popup_closed_callback(void* context) {
     furi_assert(context);
-    Infrared* infrared = context;
+    InfraredApp* infrared = context;
     view_dispatcher_send_custom_event(
         infrared->view_dispatcher, InfraredCustomEventTypePopupClosed);
 }
 
 int32_t infrared_app(void* p) {
-    Infrared* infrared = infrared_alloc();
+    InfraredApp* infrared = infrared_alloc();
 
     infrared_make_app_folder(infrared);
 
@@ -438,13 +470,15 @@ int32_t infrared_app(void* p) {
             rpc_system_app_send_started(infrared->rpc_ctx);
             is_rpc_mode = true;
         } else {
-            furi_string_set(infrared->file_path, (const char*)p);
-            is_remote_loaded = infrared_remote_load(infrared->remote, infrared->file_path);
+            const char* file_path = (const char*)p;
+            is_remote_loaded = infrared_remote_load(infrared->remote, file_path);
+
             if(!is_remote_loaded) {
-                dialog_message_show_storage_error(
-                    infrared->dialogs, "Failed to load\nselected remote");
+                infrared_show_error_message(infrared, "Failed to load\n\"%s\"", file_path);
                 return -1;
             }
+
+            furi_string_set(infrared->file_path, file_path);
         }
     }
 
